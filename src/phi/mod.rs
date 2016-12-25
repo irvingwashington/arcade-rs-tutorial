@@ -3,7 +3,11 @@ mod events;
 pub mod data;
 pub mod gfx;
 
+use self::gfx::Sprite;
 use sdl2::render::Renderer;
+use sdl2::pixels::Color;
+use std::collections::HashMap;
+use std::path::Path;
 
 struct_events! {
     keyboard: {
@@ -12,32 +16,54 @@ struct_events! {
         key_down: Down,
         key_left: Left,
         key_right: Right,
-        key_space: Space
+        key_space: Space,
+        key_return: Return
     },
     else: {
         quit: Quit { .. }
     }
 }
 
-
 /// Bundles the Phi abstractions in a single structure which
 /// can be passed easily between functions.
 pub struct Phi<'window> {
+    pub ttf_context: & 'window ::sdl2::ttf::Sdl2TtfContext,
     pub events: Events,
     pub renderer: Renderer<'window>,
+    cached_fonts: HashMap<(&'static str, u16), ::sdl2::ttf::Font<'window>>,
 }
 
 impl<'window> Phi<'window> {
-    pub fn new(events: Events, renderer: Renderer<'window>) -> Phi<'window> {
+    pub fn new(ttf_context: & 'window ::sdl2::ttf::Sdl2TtfContext, events: Events, renderer: Renderer<'window>) -> Phi<'window> {
         Phi {
+            ttf_context: ttf_context,
             events: events,
             renderer: renderer,
+            cached_fonts: HashMap::new(),
         }
     }
 
     pub fn output_size(&self) -> (f64, f64) {
         let (w, h) = self.renderer.output_size().unwrap();
         (w as f64, h as f64)
+    }
+
+    // pub fn ttf_str_sprite(&mut self, ctx: &::sdl2::ttf::Sdl2TtfContext, text: &str, font_path: &'static str, size: u16, color: Color) -> Option<Sprite> {
+    //     ctx.load_font(Path::new(font_path), size).ok().and_then(|font|
+    //             font.render(text).blended(color).ok().and_then(|surface|
+    //                 self.renderer.create_texture_from_surface(&surface).ok())
+    //             .map(Sprite::new))
+    // }
+
+    pub fn ttf_str_sprite(& mut self, text: &str, font_path: &'static str, size: u16, color: Color) -> Option<Sprite> {
+        if let Some(font) = self.cached_fonts.get(&(font_path, size)) {
+            return font.render(text).blended(color).ok().and_then(|surface| self.renderer.create_texture_from_surface(&surface).ok())
+            .map(Sprite::new)
+        }
+
+        let font = self.ttf_context.load_font(Path::new(font_path), size).unwrap();
+        self.cached_fonts.insert((font_path, size), font);
+        self.ttf_str_sprite(text, font_path, size, color)
     }
 }
 
@@ -65,7 +91,7 @@ pub fn spawn<F>(title: &str, init: F) where F: Fn(&mut Phi) -> Box<View> {
     let video = sdl_context.video().unwrap();
     let mut timer = sdl_context.timer().unwrap();
     let _image_context = ::sdl2::image::init(::sdl2::image::INIT_PNG).unwrap();
-
+    let _ttf_context = ::sdl2::ttf::init().unwrap();
     // Create the window
     let window = video.window(title, 800, 600)
         .position_centered().opengl().resizable()
@@ -73,6 +99,7 @@ pub fn spawn<F>(title: &str, init: F) where F: Fn(&mut Phi) -> Box<View> {
 
     // Create the context
     let mut context = Phi::new(
+        &_ttf_context,
         Events::new(sdl_context.event_pump().unwrap()),
         window.renderer()
         .accelerated()
@@ -82,9 +109,7 @@ pub fn spawn<F>(title: &str, init: F) where F: Fn(&mut Phi) -> Box<View> {
     // Create the default view
     let mut current_view = init(&mut context);
 
-
     // Frame timing
-
     let interval = 1_000 / 60;
     let mut before = timer.ticks();
     let mut last_second = timer.ticks();
